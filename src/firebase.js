@@ -1,22 +1,46 @@
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 
-function loadServiceAccount() {
-  // Prefer file path — multiline JSON in .env breaks dotenv parsing
-  const keyPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
-  if (keyPath) {
-    return JSON.parse(readFileSync(resolve(keyPath), 'utf8'));
+function parseServiceAccount(raw) {
+  const trimmed = raw.trim();
+
+  // Allow base64-encoded JSON (handy on Railway)
+  if (!trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(Buffer.from(trimmed, 'base64').toString('utf8'));
+    } catch {
+      // fall through to normal JSON parse for a clearer error
+    }
   }
 
+  return JSON.parse(trimmed);
+}
+
+function loadServiceAccount() {
+  // Cloud (Railway, etc.): paste JSON or base64 into this env var — no file needed
   const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (json) {
-    return JSON.parse(json);
+    return parseServiceAccount(json);
+  }
+
+  // Local: path to serviceAccountKey.json
+  const keyPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+  if (keyPath) {
+    const absolute = resolve(keyPath);
+    if (!existsSync(absolute)) {
+      throw new Error(
+        `Service account file not found at "${absolute}". ` +
+          'On Railway, remove FIREBASE_SERVICE_ACCOUNT_PATH and set FIREBASE_SERVICE_ACCOUNT_JSON instead.'
+      );
+    }
+    return JSON.parse(readFileSync(absolute, 'utf8'));
   }
 
   throw new Error(
-    'Set FIREBASE_SERVICE_ACCOUNT_PATH (recommended) or FIREBASE_SERVICE_ACCOUNT_JSON in .env'
+    'Missing Firebase credentials. Set FIREBASE_SERVICE_ACCOUNT_JSON (Railway) ' +
+      'or FIREBASE_SERVICE_ACCOUNT_PATH (local).'
   );
 }
 
